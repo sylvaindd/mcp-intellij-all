@@ -106,6 +106,7 @@ intellijPlatform {
         }
         changeNotes = """
             <ul>
+                <li><b>Unreleased</b> — Fix: <code>get_console_output</code> returned <code>"console": null</code> for run configurations hosted in the <b>Services</b> window (npm, Spring Boot, Run Dashboard) whose tab had never been displayed — their output sits in the console's deferred buffer and never reaches the editor document. It is now drained before reading. <code>get_services_output</code> no longer answers <i>“No service sessions found”</i> while sessions are running: when the Services tool window has not been materialized it falls back to the run descriptors it hosts.</li>
                 <li><b>3.13.0</b> — New <code>stop_run_configuration</code> and <code>restart_run_configuration</code> tools: stop a running run/debug configuration by name — gracefully, then force-kill — or restart it in run or debug mode, handy for servers and watchers. <code>get_console_output</code> now also reads the Services window, so Spring Boot and other server run configurations are no longer empty. Both contributed by @sylvaindd.</li>
                 <li><b>3.12.0</b> — Verified compatible with IntelliJ IDEA 2026.2 (build 262). The minimum supported version is unchanged (2025.3).</li>
                 <li><b>3.11.0</b> — The status-bar widget now shows a small notification badge counting MCP calls as they happen; click the icon to reset it (and open the actions menu).</li>
