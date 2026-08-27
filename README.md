@@ -25,8 +25,8 @@ An IntelliJ IDEA plugin that extends the built-in [JetBrains MCP Server](https:/
 | Tool | Description |
 |------|-------------|
 | `get_build_output` 🔬 | Build tool window: structured error tree with file/line numbers + console text |
-| `get_console_output` 🔬 | Console output from both Run and Debug tool windows, with active window and tab indicated |
-| `get_services_output` ⚠️ | Services tool window sessions: SQL output log, result grids, active session/tab indicated |
+| `get_console_output` 🔬 | Console output from the Run, Debug **and Services** tool windows, with active window and tab indicated. Reads plain, wrapped (Spring Boot) and terminal-emulation consoles alike — the latter covers Node/npm, whose output lives in a terminal buffer rather than an editor. When a console still can't be read, `consoleType` names the actual console implementation instead of returning a bare `null` |
+| `get_services_output` ⚠️ | Services tool window sessions: SQL output log, result grids, active session/tab indicated. Falls back to the run descriptors the Services window hosts when the tool window hasn't been materialized yet, so running sessions are still reported |
 | `get_test_results` 🔬 | Last test run results: passed/failed/ignored status, duration, and failure messages |
 | `get_terminal_output` 🔬 | Content of all tabs in the embedded Terminal tool window |
 | `send_to_terminal` 🔬 🔒 | Send a command to a terminal tab and execute it. Optional `waitForIdle=true` (+ `timeoutMs`, `idleQuietMs`) blocks until the terminal output stops changing |
@@ -212,7 +212,7 @@ Headless, ~3 seconds, no sandbox needed.
 | `ReflectionApiTest` | light | Verifies every reflection call still resolves against current IntelliJ JARs: `CoreProgressManager`, `TaskInfo`, `McpToolset`, `McpServerSettings`, `TerminalViewImpl.createSendTextBuilder/doSendText`, `TerminalSendTextOptions` constructor |
 | `CodeAnalysisReflectionTest` | light | Verifies `HighlightInfo.offsetStore`, `getIntentionActionDescriptors`, `DocumentMarkupModel.forDocument`, `DaemonCodeAnalyzer.isRunning` |
 | `ToolsetIntegrationTest` | heavy | `BasePlatformTestCase` tests in a headless IntelliJ — real PSI, real editor, real breakpoint manager. Covers: `get_open_editors`, caret/selection, highlight/clear, `relativize`, markup model, `replace_text_undoable`, `delete_file`, add/mute/condition breakpoints, `collectRunningProcesses` |
-| `SandboxToolsHeadlessTest` | heavy | Headless coverage for tools marked 🔬: `get_ide_settings`, `get_intellij_diagnostic` components, `execute_ide_action`, build tree parsing, `SMTestProxy` status mapping, `RunManager`, `get_console_output` structure (empty run/debug in headless), `get_terminal_output` fallback, `send_to_terminal` fallback + disabled-by-default behavior |
+| `SandboxToolsHeadlessTest` | heavy | Headless coverage for tools marked 🔬: `get_ide_settings`, `get_intellij_diagnostic` components, `execute_ide_action`, build tree parsing, `SMTestProxy` status mapping, `RunManager`, `get_console_output` structure (empty run/debug in headless), deferred-console draining (text printed into a console kept out of any showing hierarchy), `servicesSessionsFromDescriptors`, `get_terminal_output` fallback, `send_to_terminal` fallback + disabled-by-default behavior |
 
 Tools marked ⚠️ in the tables above have no automated test coverage and must be tested manually via `runIde` + curl SSE (see `CLAUDE.md`).
 

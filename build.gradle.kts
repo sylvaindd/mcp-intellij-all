@@ -19,7 +19,7 @@ val secrets = Properties().apply {
 }
 
 group = "io.nimbly"
-version = "3.13.0"
+version = "3.13.1"
 
 // Auto-detect the installed IntelliJ IDEA whose bundled MCP server we compile against, instead of
 // hard-coding a version path (which broke on every IDE update). We look for the IDE "home" folder
@@ -122,6 +122,7 @@ intellijPlatform {
         }
         changeNotes = """
             <ul>
+                <li><b>3.13.1</b> — Build hygiene: the plugin no longer emits Kotlin compatibility bridges for <code>McpToolset</code>'s default methods, which referenced <code>isExperimental()</code>/<code>alwaysIncluded()</code> — methods absent from the 2025.3 / 2026.1 MCP server. That was the only source of the Marketplace verifier's compatibility problems; behaviour is unchanged on every supported IDE.</li>
                 <li><b>3.13.0</b> — Fix: <code>get_console_output</code> and <code>get_services_output</code> can now read <b>terminal-emulation consoles</b>. Node/npm and similar run configurations render into a <code>TerminalExecutionConsole</code> that contains no editor at all, so every editor-based strategy returned <code>null</code> for them. They are now read from the terminal text buffer, scrollback included. When a console still cannot be read, <code>get_console_output</code> reports a <code>consoleType</code> field naming the actual console implementation instead of a bare <code>null</code>.</li>
                 <li><b>3.12.0</b> — Fix: <code>get_console_output</code> returned <code>"console": null</code> for run configurations hosted in the <b>Services</b> window (npm, Spring Boot, Run Dashboard) whose tab had never been displayed — their output sits in the console's deferred buffer and never reaches the editor document. It is now drained before reading. <code>get_services_output</code> no longer answers <i>“No service sessions found”</i> while sessions are running: when the Services tool window has not been materialized it falls back to the run descriptors it hosts.</li>
                 <li><b>3.11.0</b> — The status-bar widget now shows a small notification badge counting MCP calls as they happen; click the icon to reset it (and open the actions menu).</li>
@@ -253,5 +254,12 @@ kotlin {
         // IDEs ship at runtime, keeping this fork buildable against upstream's target IDEs too.
         languageVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_2)
         apiVersion.set(org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_2_2)
+        // Default mode makes Kotlin emit a compatibility bridge in every class implementing an
+        // interface that has default methods. For McpToolset that meant each of our 11 toolsets
+        // carried isExperimental()/alwaysIncluded() bodies doing `invokespecial McpToolset.<method>`
+        // — methods that do NOT exist in the 253/261 MCP server, which is the 22 COMPATIBILITY_PROBLEMS
+        // the Marketplace verifier reported. NO_COMPATIBILITY stops generating those bridges; the
+        // interface defaults are used directly, so behaviour is unchanged on every target.
+        jvmDefault.set(org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode.NO_COMPATIBILITY)
     }
 }
