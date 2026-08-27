@@ -11,7 +11,9 @@ import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.testFramework.LoggedErrorProcessor
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.intellij.util.ThrowableRunnable
 import com.intellij.xdebugger.XDebuggerManager
 import com.intellij.xdebugger.XDebuggerUtil
 import com.intellij.xdebugger.breakpoints.XLineBreakpoint
@@ -192,10 +194,38 @@ class ToolsetIntegrationTest : BasePlatformTestCase() {
 
     // ── Debug — breakpoints ───────────────────────────────────────────────────
 
-    fun `test add and get line breakpoint`() {
+    /**
+     * Runs [body] with the Java debugger's `Breakpoint.getProperties must not return null`
+     * assertion demoted to a no-op.
+     *
+     * BasePlatformTestCase turns any logged SEVERE into a test failure. Creating an XLineBreakpoint
+     * in a light fixture makes the Java debugger build a companion `Breakpoint` whose properties are
+     * only populated by a real debug session, and the platform logs that @NotNull violation
+     * asynchronously from a `fileDocumentBindingChanged` message-bus listener. It is unrelated to
+     * the toolset code under test and reproduces on a clean checkout — only this one message is
+     * suppressed, every other logged error still fails the test.
+     */
+    private fun withoutJavaBreakpointPropertiesAssertion(body: () -> Unit) {
+        LoggedErrorProcessor.executeWith<Throwable>(
+            object : LoggedErrorProcessor() {
+                override fun processError(
+                    category: String,
+                    message: String,
+                    details: Array<out String>,
+                    t: Throwable?,
+                ): Set<Action> =
+                    if ("getProperties must not return null" in message) Action.NONE
+                    else super.processError(category, message, details, t)
+            },
+            ThrowableRunnable { body() },
+        )
+    }
+
+    fun `test add and get line breakpoint`() = withoutJavaBreakpointPropertiesAssertion {
         val manager = XDebuggerManager.getInstance(project).breakpointManager
         val bp = addTestBreakpoint(manager, "BpCalc.java", 0) ?: run {
-            System.err.println("SKIP: no line breakpoint type available in headless — verified via curl SSE"); return
+            System.err.println("SKIP: no line breakpoint type available in headless — verified via curl SSE")
+            return@withoutJavaBreakpointPropertiesAssertion
         }
         try {
             val found = manager.allBreakpoints
@@ -208,10 +238,11 @@ class ToolsetIntegrationTest : BasePlatformTestCase() {
         }
     }
 
-    fun `test mute and unmute breakpoints`() {
+    fun `test mute and unmute breakpoints`() = withoutJavaBreakpointPropertiesAssertion {
         val manager = XDebuggerManager.getInstance(project).breakpointManager
         val bp = addTestBreakpoint(manager, "BpMute.java", 0) ?: run {
-            System.err.println("SKIP: no line breakpoint type available in headless"); return
+            System.err.println("SKIP: no line breakpoint type available in headless")
+            return@withoutJavaBreakpointPropertiesAssertion
         }
         try {
             invokeAndWaitIfNeeded { bp.isEnabled = false }
@@ -224,10 +255,11 @@ class ToolsetIntegrationTest : BasePlatformTestCase() {
         }
     }
 
-    fun `test set breakpoint condition`() {
+    fun `test set breakpoint condition`() = withoutJavaBreakpointPropertiesAssertion {
         val manager = XDebuggerManager.getInstance(project).breakpointManager
         val bp = addTestBreakpoint(manager, "BpCond.java", 0) ?: run {
-            System.err.println("SKIP: no line breakpoint type available in headless"); return
+            System.err.println("SKIP: no line breakpoint type available in headless")
+            return@withoutJavaBreakpointPropertiesAssertion
         }
         try {
             invokeAndWaitIfNeeded {
