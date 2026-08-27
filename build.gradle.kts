@@ -19,7 +19,7 @@ val secrets = Properties().apply {
 }
 
 group = "io.nimbly"
-version = "3.11.0"
+version = "3.12.0"
 
 // Auto-detect the installed IntelliJ IDEA whose bundled MCP server we compile against, instead of
 // hard-coding a version path (which broke on every IDE update). We look for the IDE "home" folder
@@ -122,6 +122,7 @@ intellijPlatform {
         }
         changeNotes = """
             <ul>
+                <li><b>3.12.0</b> — Fix: <code>get_console_output</code> returned <code>"console": null</code> for run configurations hosted in the <b>Services</b> window (npm, Spring Boot, Run Dashboard) whose tab had never been displayed — their output sits in the console's deferred buffer and never reaches the editor document. It is now drained before reading. <code>get_services_output</code> no longer answers <i>“No service sessions found”</i> while sessions are running: when the Services tool window has not been materialized it falls back to the run descriptors it hosts.</li>
                 <li><b>3.11.0</b> — The status-bar widget now shows a small notification badge counting MCP calls as they happen; click the icon to reset it (and open the actions menu).</li>
                 <li><b>3.10.1</b> — Multi-module / multi-project robustness: relative file paths now resolve against every content root (not just the project base), so files in a second module are found; a path that matches several roots returns a clear error listing the absolute candidates instead of silently guessing. <code>get_project_structure</code> now reports each module's absolute content roots.</li>
                 <li><b>3.10.0</b> — Higher-risk tools now ask before running: while unchecked in Settings they pop an Allow/Deny dialog with the call arguments; tick <i>“Always allow”</i> to skip the prompt next time. Flagged ✋ in Settings.</li>
