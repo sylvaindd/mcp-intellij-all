@@ -193,9 +193,14 @@ class McpCompanionBuildToolset : McpToolset {
         - results: list of result grids, each with a name and tabular data (column headers + rows)
         Covers database sessions, run configurations, Spring Boot apps, etc.
 
+        name: only return sessions whose name contains this text, case-insensitive (e.g. "HazelcastAdmin").
+          Use it when many sessions run: the full output of all of them can exceed what the client accepts.
+        maxLines: keep only the last N lines of each session's output (default 200). 0 returns everything.
+          Each session reports totalLines and truncated so you can ask for more.
+
         projectPath: absolute path of the target project's root — defaults to the currently-focused project if omitted. Useful when several IntelliJ windows are open in the same JVM.
     """)
-    suspend fun get_services_output(projectPath: String? = null): String {
+    suspend fun get_services_output(name: String? = null, maxLines: Int = DEFAULT_CONSOLE_LINES, projectPath: String? = null): String {
         disabledMessage("get_services_output")?.let { return it }
         val project = resolveProject(projectPath)
         return captureResponse(runOnEdt {
@@ -395,11 +400,21 @@ class McpCompanionBuildToolset : McpToolset {
             // The Services window builds its content lazily: with no ServiceViewTree / wrapper to
             // scrape, every branch above comes back empty even while sessions run — which is how this
             // tool ended up reporting "none" while get_console_output listed two live sessions.
-            val effectiveSessions = sessions.ifEmpty { servicesSessionsFromDescriptors(project) }
+            val allSessions = sessions.ifEmpty { servicesSessionsFromDescriptors(project) }
+            val filter = name?.trim()?.takeIf { it.isNotEmpty() }
+            val effectiveSessions = allSessions
+                .filter { filter == null || it.name.contains(filter, ignoreCase = true) }
+                .map { session ->
+                    val tail = session.output?.let { tailLines(it, maxLines) } ?: return@map session
+                    session.copy(output = tail.first, totalLines = tail.second, truncated = maxLines > 0 && tail.second > maxLines)
+                }
 
-            if (effectiveSessions.isEmpty())
-                Json.encodeToString(ServicesOutput(sessions = listOf(ServiceSession(name = "info", output = "No service sessions found"))))
-            else
+            if (effectiveSessions.isEmpty()) {
+                val msg = if (filter != null && allSessions.isNotEmpty())
+                    "No service session matches \"$filter\". Sessions: " + allSessions.joinToString { it.name }
+                else "No service sessions found"
+                Json.encodeToString(ServicesOutput(sessions = listOf(ServiceSession(name = "info", output = msg))))
+            } else
                 Json.encodeToString(ServicesOutput(effectiveSessions))
         })
     }
@@ -434,19 +449,44 @@ class McpCompanionBuildToolset : McpToolset {
         wrap their console (ConsoleViewWrapperBase / DuplexConsoleView) — their output is read too.
         Use this whenever the user ran or debugged something and you need to see the output.
 
+        name: only return tabs whose name contains this text, case-insensitive (e.g. "HazelcastAdmin").
+          The names of the tabs it skipped are listed in filteredOut.
+          Use it when many run configurations are open: the full output of every tab can exceed what
+          the client accepts. Omit to return every tab.
+        maxLines: keep only the last N lines of each console (default 200). 0 returns the whole console.
+          Each tab reports totalLines and truncated so you can ask for more.
+
         projectPath: absolute path of the target project's root — defaults to the currently-focused project if omitted. Useful when several IntelliJ windows are open in the same JVM.
     """)
-    suspend fun get_console_output(projectPath: String? = null): String {
+    suspend fun get_console_output(name: String? = null, maxLines: Int = DEFAULT_CONSOLE_LINES, projectPath: String? = null): String {
         disabledMessage("get_console_output")?.let { return it }
         val project = resolveProject(projectPath)
         // encodeDefaults so the run/debug/services keys are ALWAYS present, even when empty — an
         // empty result serializes to {"run":[],"debug":[],"services":[]} instead of a bare {},
         // which (a) tells the client the services field exists and (b) makes "no output found"
         // unambiguously distinguishable from an old plugin build.
-        return captureResponse(runOnEdt { consoleJson.encodeToString(extractConsoleOutput(project)) })
+        return captureResponse(runOnEdt { consoleJson.encodeToString(extractConsoleOutput(project, name, maxLines)) })
     }
 
-    internal fun extractConsoleOutput(project: com.intellij.openapi.project.Project): ConsoleOutput {
+    /**
+     * Last [maxLines] lines of [text] (all of it when [maxLines] <= 0), with the total line count.
+     * A trailing newline does not count as an extra empty line.
+     */
+    internal fun tailLines(text: String, maxLines: Int): Pair<String, Int> {
+        val lines = text.removeSuffix("\n").split('\n')
+        if (maxLines <= 0 || lines.size <= maxLines) return text to lines.size
+        return lines.takeLast(maxLines).joinToString("\n") to lines.size
+    }
+
+    /**
+     * @param nameFilter keep only descriptors whose display name contains it (case-insensitive); null = all.
+     * @param maxLines tail of each console to keep; <= 0 = whole console (the default for internal callers).
+     */
+    internal fun extractConsoleOutput(
+        project: com.intellij.openapi.project.Project,
+        nameFilter: String? = null,
+        maxLines: Int = 0,
+    ): ConsoleOutput {
         // Enumerate the running/finished process DESCRIPTORS directly rather than walking the
         // "Run"/"Debug" tool-window contents. Modern IntelliJ routes many configs (Spring Boot and
         // every Run-Dashboard type) into the "Services" tool window — so getToolWindow("Run") is
@@ -467,7 +507,14 @@ class McpCompanionBuildToolset : McpToolset {
         val debugTabs = mutableListOf<ConsoleTab>()
         val serviceTabs = mutableListOf<ConsoleTab>()
 
+        val filter = nameFilter?.trim()?.takeIf { it.isNotEmpty() }
+        val filteredOut = mutableListOf<String>()
         for (d in all) {
+            // Filter before reading: reading a long console is the expensive part.
+            if (filter != null && !(d.displayName ?: "Run").contains(filter, ignoreCase = true)) {
+                filteredOut += d.displayName ?: "Run"
+                continue
+            }
             val consoleRoot = d.executionConsole?.component ?: d.component
             val treeNodes = consoleRoot?.let { c ->
                 UIUtil.findComponentsOfType(c, JTree::class.java).firstOrNull()
@@ -479,11 +526,14 @@ class McpCompanionBuildToolset : McpToolset {
             val host = hostWindow(project, d)
             val selected = host?.contentManagerIfCreated?.selectedContent
             val consoleText = readDescriptorConsole(d)
+            val tail = consoleText?.let { tailLines(it, maxLines) }
             val tab = ConsoleTab(
                 name = d.displayName ?: "Run",
                 active = selected != null && selected === d.attachedContent,
                 tree = treeNodes,
-                console = consoleText,
+                console = tail?.first,
+                totalLines = tail?.second,
+                truncated = tail != null && maxLines > 0 && tail.second > maxLines,
                 consoleType = if (consoleText == null) describeConsole(d) else null,
                 alive = d.processHandler?.isProcessTerminated == false,
             )
@@ -503,7 +553,9 @@ class McpCompanionBuildToolset : McpToolset {
             hasDebugSessions = runCatching { XDebuggerManager.getInstance(project).debugSessions.isNotEmpty() }.getOrDefault(false),
         )
 
-        return ConsoleOutput(activeWindow = activeWindow, run = runTabs, debug = debugTabs, services = serviceTabs)
+        return ConsoleOutput(activeWindow = activeWindow, run = runTabs, debug = debugTabs, services = serviceTabs,
+            // Names of the tabs the filter skipped, so a caller whose filter matched nothing sees the real names.
+            filteredOut = if (filter != null) filteredOut else null)
     }
 
     private fun hostWindow(project: com.intellij.openapi.project.Project, d: RunContentDescriptor): com.intellij.openapi.wm.ToolWindow? =
@@ -1028,11 +1080,14 @@ class McpCompanionBuildToolset : McpToolset {
 @Serializable data class BuildNode(val text: String, val severity: String? = null, val detail: String? = null, val file: String? = null, val line: Int? = null, val children: List<BuildNode>? = null)
 
 @Serializable data class ServicesOutput(val sessions: List<ServiceSession>)
-@Serializable data class ServiceSession(val name: String, val selected: Boolean = false, val output: String? = null, val outputSelected: Boolean = false, val results: List<ServiceResult> = emptyList())
+@Serializable data class ServiceSession(val name: String, val selected: Boolean = false, val output: String? = null, val outputSelected: Boolean = false, val results: List<ServiceResult> = emptyList(), val totalLines: Int? = null, val truncated: Boolean = false)
 @Serializable data class ServiceResult(val name: String, val selected: Boolean = false, val data: String? = null)
 
-@Serializable data class ConsoleOutput(val activeWindow: String? = null, val run: List<ConsoleTab> = emptyList(), val debug: List<ConsoleTab> = emptyList(), val services: List<ConsoleTab> = emptyList())
-@Serializable data class ConsoleTab(val name: String, val active: Boolean = false, val tree: List<BuildNode>? = null, val console: String? = null, val consoleType: String? = null, val alive: Boolean = false)
+/** Lines of each console returned by default by get_console_output / get_services_output. */
+internal const val DEFAULT_CONSOLE_LINES = 200
+
+@Serializable data class ConsoleOutput(val activeWindow: String? = null, val run: List<ConsoleTab> = emptyList(), val debug: List<ConsoleTab> = emptyList(), val services: List<ConsoleTab> = emptyList(), val filteredOut: List<String>? = null)
+@Serializable data class ConsoleTab(val name: String, val active: Boolean = false, val tree: List<BuildNode>? = null, val console: String? = null, val consoleType: String? = null, val alive: Boolean = false, val totalLines: Int? = null, val truncated: Boolean = false)
 
 @Serializable data class TestRunOutput(val runs: List<TestRun>, val error: String? = null)
 @Serializable data class TestRun(val name: String, val tests: List<TestNode>)

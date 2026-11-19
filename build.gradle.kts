@@ -13,7 +13,7 @@ val secrets = Properties().apply {
 }
 
 group = "io.nimbly"
-version = "3.13.1"
+version = "3.13.2"
 
 // Bytecode level: the JVM running Gradle, capped at 21 (the oldest runtime we support is IDE 253 =
 // JBR 21, which runs any class file <= 65). The IntelliJ Platform Gradle plugin >= 2.8 would force a
@@ -146,6 +146,7 @@ intellijPlatform {
         }
         changeNotes = """
             <ul>
+                <li><b>3.13.2</b> — <code>get_console_output</code> and <code>get_services_output</code> take a <code>name</code> filter and a <code>maxLines</code> tail (200 lines per console by default, 0 for everything). With many run configurations open, returning every full console exceeded what MCP clients accept (16 MB), so the tools could not be used at all. Each console reports <code>totalLines</code> and <code>truncated</code>; tabs skipped by the filter are listed in <code>filteredOut</code>.</li>
                 <li><b>3.13.1</b> — Compatibility with IntelliJ IDEA 2026.3 (build 263): the Monitoring window records the end of every tool call again (263 changed <code>ToolCallListener.afterMcpToolCall</code>), the MCP Server enable check and first-launch auto-enable work with 263's new settings API, and the GitHub pull request tools use 263's <code>execute(ProgressIndicator, request)</code>. Still verified compatible with 2025.3 and 2026.1.</li>
                 <li><b>3.13.1</b> — Build hygiene: the plugin no longer emits Kotlin compatibility bridges for <code>McpToolset</code>'s default methods, which referenced <code>isExperimental()</code>/<code>alwaysIncluded()</code> — methods absent from the 2025.3 / 2026.1 MCP server. That was the only source of the Marketplace verifier's compatibility problems; behaviour is unchanged on every supported IDE.</li>
                 <li><b>3.13.1</b> — Fix: <code>get_console_output</code> and <code>get_services_output</code> can now read <b>terminal-emulation consoles</b>. Node/npm and similar run configurations render into a <code>TerminalExecutionConsole</code> that contains no editor at all, so every editor-based strategy returned <code>null</code> for them. They are now read from the terminal text buffer, scrollback included. When a console still cannot be read, <code>get_console_output</code> reports a <code>consoleType</code> field naming the actual console implementation instead of a bare <code>null</code>.</li>
